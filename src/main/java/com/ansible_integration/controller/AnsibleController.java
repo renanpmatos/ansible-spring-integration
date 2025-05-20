@@ -1,14 +1,15 @@
 package com.ansible_integration.controller;
 
-import com.ansible_integration.dto.PlaybookExecutionDTO;
 import com.ansible_integration.dto.PlaybookExecutionWithKeyDTO;
 import com.ansible_integration.service.AnsibleService;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/playbooks")
@@ -35,13 +36,22 @@ public class AnsibleController {
         }
     }
 
-    @PostMapping("/execute")
-    public ResponseEntity<?> execute(@RequestBody PlaybookExecutionWithKeyDTO dto) {
+    @PostMapping(value = "/execute", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<String> executePipeline(
+            @RequestParam("playbook") MultipartFile playbookFile,
+            @RequestParam("privateKey") MultipartFile privateKeyFile,
+            @RequestParam Map<String, String> allRequestParams
+    ) {
         try {
-            String result = ansibleService.executePlaybook(dto.getPlaybookName(), dto.getParameters());
-            return ResponseEntity.ok(result);
+            // Remove os arquivos específicos dos parametros
+            allRequestParams.remove("playbook");
+            allRequestParams.remove("privateKey");
+
+            String output = ansibleService.executePlaybook(playbookFile, privateKeyFile, allRequestParams);
+            return ResponseEntity.ok(output);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Erro ao executar playbook.");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Erro ao executar playbook: " + e.getMessage());
         }
     }
 }

@@ -38,37 +38,68 @@ public class AnsibleService {
         }
     }
 
-    public String executePlaybook(String playbookName, Map<String, String> parameters, MultipartFile privateKey) throws IOException, InterruptedException {
-        Path playbookDir = Paths.get("/opt/playbooks");
-        Path playbookFile = playbookDir.resolve(playbookName + ".yml");
+    public String executePlaybook(MultipartFile playbook, MultipartFile privateKey, Map<String, String> parameters)
+            throws IOException, InterruptedException {
 
-        // Criar chave temporária
-        Path tempKeyFile = Files.createTempFile("temp-key", ".pem");
-        Files.write(tempKeyFile, privateKey.getBytes());
-        Files.setPosixFilePermissions(tempKeyFile, Set.of(PosixFilePermission.OWNER_READ));
+        Path playbookPath = Files.createTempFile("playbook-", ".yml");
+        Path privateKeyPath = Files.createTempFile("key-", ".pem");
 
-        String command = "ansible-playbook " + playbookFile.toAbsolutePath() +
-                " --private-key " + tempKeyFile.toAbsolutePath();
+        try {
+            // Salva os arquivos
+            Files.write(playbookPath, playbook.getBytes());
+            Files.write(privateKeyPath, privateKey.getBytes());
+            Files.setPosixFilePermissions(privateKeyPath, Set.of(PosixFilePermission.OWNER_READ));
 
-        if (!parameters.isEmpty()) {
-            String extraVars = parameters.entrySet().stream()
-                    .map(e -> e.getKey() + "=" + e.getValue())
-                    .collect(Collectors.joining(" "));
-            command += " --extra-vars \"" + extraVars + "\"";
+            // Constrói extra vars
+            String extraVars = "";
+            if (!parameters.isEmpty()) {
+                extraVars = parameters.entrySet().stream()
+                        .map(entry -> entry.getKey() + "=" + entry.getValue())
+                        .collect(Collectors.joining(" "));
+            }
+
+            // Detecta SO
+            String os = System.getProperty("os.name").toLowerCase();
+            boolean isWindows = os.contains("win");
+
+            // Ajusta paths e comando conforme o SO
+            String command;
+            if (isWindows) {
+                String playbookWsl = convertToWslPath(playbookPath.toAbsolutePath().toString());
+                String keyWsl = convertToWslPath(privateKeyPath.toAbsolutePath().toString());
+
+                 command = "wsl ansible-playbook " + playbookWsl + " --private-key " + keyWsl;
+                    if (!extraVars.isEmpty()) {
+                        command += " --extra-vars \"" + extraVars + "\"";
+                    }
+                } else {
+                    command = "ansible-playbook " + playbookPath + " --private-key " + privateKeyPath;
+                    if (!extraVars.isEmpty()) {
+                        command += " --extra-vars \"" + extraVars + "\"";
+                    }
+                }
+
+                // Executa comando
+                ProcessBuilder pb = new ProcessBuilder("bash", "-c", command);
+                pb.redirectErrorStream(true);
+                Process process = pb.start();
+
+                String output = new String(process.getInputStream().readAllBytes());
+                int exitCode = process.waitFor();
+
+                return "Código de saída: " + exitCode + "\n\n" + output;
+
+            } finally {
+                // Remove arquivos temporários
+                Files.deleteIfExists(playbookPath);
+                Files.deleteIfExists(privateKeyPath);
+            }
         }
 
-        ProcessBuilder pb = new ProcessBuilder("bash", "-c", command);
-        pb.directory(playbookDir.toFile());
-
-        Process process = pb.start();
-        String output = new String(process.getInputStream().readAllBytes());
-        process.waitFor();
-
-        // Limpar chave temporária
-        Files.deleteIfExists(tempKeyFile);
-
-        return output;
-    }
-
+        private String convertToWslPath(String windowsPath) {
+            return windowsPath
+                    .replace("C:", "/mnt/c")
+                    .replace("\\", "/");
+        }
 
 }
